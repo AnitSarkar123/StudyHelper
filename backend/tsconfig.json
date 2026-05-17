@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "allowJs": true,
+    "strict": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    
+     "paths": {
+       "@/*": ["src/*"]
+    },
+    
+  },
+  "include": ["src/**/*", "lessons/**/*", "added/**/*", "lessions/graph.ts", "lessions/index.ts", "lessions/runnable.ts", "lessions/tools.ts"],
+  "exclude": ["node_modules", "dist"] 
+}
