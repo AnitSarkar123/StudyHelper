@@ -5,7 +5,7 @@ import { PromptTemplate, ChatPromptTemplate } from '@langchain/core/prompts';
 import { z } from 'zod';
 import { ChatFireworks } from '@langchain/community/chat_models/fireworks';
 import { ChatOpenAI } from '@langchain/openai';
-
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai"
 const MindElixirNode = z.object({
   id: z.string(),
   topic: z.string(),
@@ -28,81 +28,60 @@ const MindElixirNode = z.object({
     .optional(),
 });
 
-const MindElixerData =z.object({
-    nodeData: MindElixirNode,
-})
-
 // Ensure environment variables are loaded
-if (!process.env.LLM_API_KEY) {
-    throw new Error('LLM_API_KEY environment variable is not set');
+if (!process.env.LLM_API_KEY || !process.env.GOOGLE_API_KEY) {
+    throw new Error('LLM_API_KEY and GOOGLE_API_KEY environment variables are not set');
 }
 
-const llm = new ChatOpenAI({
-    apiKey: process.env.LLM_API_KEY,
-    model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
-    configuration: {
-        baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
-    }
-});
+// const llm = new ChatOpenAI({
+//     apiKey: process.env.LLM_API_KEY,
+//     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
+//     configuration: {
+//         baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
+//     }
+// });
+const llm = new ChatGoogleGenerativeAI({
+    model: "gemini-2.5-flash-lite",
+    temperature: 0.5,
+    maxRetries: 2,
+    
+})
 
 const prompt = PromptTemplate.fromTemplate(`
-You are an expert-level tutor in the education department. Your task is to create a Mind Map that enhances student understanding. The map must be organized, comprehensive, and accurate. Accuracy, clarity, and relevance are core success factors.
-
-Key References:
-- Tony Buzan, "The Mind Map Book" (2003)
-- Peter C. Brown et al., "Make It Stick" (2014)
-- Amy E. Herman, "Visual Intelligence" (2016)
+You are an expert Mind Map creator. Your ONLY task is to generate VALID MindElixir JSON mind map.
 
 Study Guide:
 {study_guide_text}
 
-Follow these rules strictly:
-
-1. Initial Inquiry: Begin by asking the user up to 3 pertinent questions to gather essential specifics for personalization (e.g., target audience, depth, specific goals). 
-   Stop here and wait for the user's response before proceeding.
-
-2. Strategic Analysis: Take a step back and think about the task thoroughly. Consider success factors, evaluation criteria, and the user's input to craft the Mind Map.
-
-3. Map Generation: Present the Mind Map in Valid MindElixir JSON format. 
-   - Use short node names (1-5 words).
-   - Move long explanations or details into child nodes.
-   - Ensure the structure matches the MindElixir schema exactly.
-   - Output ONLY the JSON (no markdown blocks, no introductory text).
-
-4. Self-Evaluation: After generating the map, evaluate your work using a table with: 
-   - Criteria
-   - Rating (1-10)
-   - Reasons for Rating
-
-5. Refinement Options: Provide post-evaluation options for refining the Mind Map. Suggest 3-4 specific improvements (e.g., "Simplify for beginners," "Add more examples," "Expand on X topic").
-
-6. Change Log: Append a CHANGE LOG section for any revisions or hypothetical changes made during the evaluation step.
-
-7. Closing: Always conclude with: 
-   "Would You Like Me To Evaluate This Work and Provide Options to Improve It? Yes or No"
-
-JSON Structure Rules:
-- Root node id must be "root".
-- Root node topic must be the main subject.
-- All children must have unique ids.
-- Format as a list of Q and A or hierarchical nodes.
-- Ensure the structure matches MindElixir format.
-- Do not include any text outside JSON for the map itself.
-
-Example JSON Structure:
+CRITICAL - OUTPUT FORMAT:
+Your response must be EXACTLY this format with NO wrapper objects:
 {{
   "id": "root",
-  "topic": "Main Topic",
+  "topic": "Main Subject Title",
   "children": [
     {{
-      "id": "unique_id",
-      "topic": "Short Node Name",
-      "children": [ ]
+      "id": "1",
+      "topic": "Main Topic",
+      "children": [
+        {{
+          "id": "1.1",
+          "topic": "Subtopic"
+        }}
+      ]
     }}
   ]
 }}
 
-Output the Mind Map as JSON only, fully compatible with MindElixir.
+RULES:
+- Output ONLY the JSON object (no "root": {{...}} wrapper)
+- Start with {{ and end with }}
+- No explanations, no markdown code blocks
+- No text before or after the JSON
+- Each node must have: id (string), topic (string), children (array, optional)
+- Keep node topics short (1-5 words)
+- Use hierarchical ids: "1", "1.1", "1.1.1", etc.
+
+FAIL if your response has any wrapper like "root": {{...}} or "nodeData": {{...}}
 `);
 const chain =prompt.pipe(llm);
 const chainResult = await chain.invoke({
@@ -171,13 +150,26 @@ A key framework that combines an LLM with a knowledge retrieval system.
 - Augmentation (RAG, Tool Use) is essential for applications requiring factual, dynamic, and verifiable outputs.
 - Always validate the model's output, especially when using complex reasoning chains.
 `
-},{
-    response_format:{
-        type:"json_object"
-    }
-} as any
-);
-const json =JSON.parse(chainResult?.content as string)
-console.log(JSON.stringify(json, null, 2))
+});
+
+let content = chainResult?.content as string;
+
+// Extract JSON from response (in case there's any extra text)
+let jsonString = content.trim();
+
+// Try to find JSON object in the response
+const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
+if (jsonMatch) {
+    jsonString = jsonMatch[0];
+}
+
+try {
+    const json = JSON.parse(jsonString);
+    console.log(JSON.stringify(json, null, 2));
+} catch (e) {
+    console.error("Failed to parse JSON response:");
+    console.error(content);
+    console.error("\nError:", (e as Error).message);
+}
 
 

@@ -1,7 +1,7 @@
-import { Document } from "langchain";
-import { StateGraph,Annotation,Send } from "@langchain/langgraph";
-import { ChatPromptTemplate } from "@langchain/core/prompts";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import  { Document } from "langchain";
+import  { StateGraph,Annotation,Send } from "@langchain/langgraph";
+import  { ChatPromptTemplate } from "@langchain/core/prompts";
+import  { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
 
 import { ChatOpenAI } from "@langchain/openai";
@@ -23,7 +23,7 @@ const llm = new ChatOpenAI({
     apiKey: process.env.LLM_API_KEY,
     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
 });
-const maxTokens = 1000
+const maxTokens = 10000
 
 function approximateTokens(text: string) {
     return Math.ceil(text.length / 4)
@@ -80,12 +80,20 @@ interface SummaryState {
 }
 
 // Here we generate a summary, given a document
-const generateSummary = async (
+const createBriefingChunks = async (
   state: SummaryState
 ): Promise<{ summaries: string[] }> => {
   const mapPrompt = ChatPromptTemplate.fromMessages([
-    ["user", "Write a concise summary of the following: \n\n{context}"],
-  ]);
+  [
+    "user",
+    `Create a professional briefing document for the following text.
+Include:
+- Summary of main ideas
+- Key takeaways
+- Actionable insights or recommendations
+Format as concise, clear paragraphs:\n\n{context}`,
+  ],
+]);
   const prompt = await mapPrompt.invoke({ context: state.content });
   const response = await llm.invoke(prompt);
   return { summaries: [String(response.content)] };
@@ -93,17 +101,17 @@ const generateSummary = async (
 
 // Here we define the logic to map out over the documents
 // We will use this an edge in the graph
-const mapSummaries = (state: typeof OverallState.State) => {
+const distributeBriefingContent = (state: typeof OverallState.State) => {
   // We will return a list of Send objects
   // Each Send object consists of the name of a node in the graph
   // as well as the state to send to that node
   return state.contents.map(
-    (content) => new Send("generateSummary", { content })
+    (content) => new Send("createBriefingChunks", { content })
   );
 };
 
 
-const collectSummaries = async (state: typeof OverallState.State) => {
+const aggregateBriefingSummaries = async (state: typeof OverallState.State) => {
   return {
     collapsedSummaries: state.summaries.map(
       (summary) => new Document({ pageContent: summary })
@@ -122,54 +130,88 @@ async function _reduce(documents: Document[]): Promise<string> {
 }
 
 const reducePrompt = ChatPromptTemplate.fromMessages([
-  ["user", "The following is a set of summaries:\n{docs}\nTake these and distill it into a final, consolidated summary of the main themes."],
+  [
+    "user",
+    `The following are briefing chunks:
+{docs}
+Distill these into a single cohesive briefing document.
+Maintain main ideas, key takeaways, and actionable insights.`,
+  ],
 ]);
 
 
-const collapseSummaries = async (state: typeof OverallState.State) => {
+const mergeBriefingBatches = async (state: typeof OverallState.State) => {
+  // If we only have one document, reduce it to final summary
+  if (state.collapsedSummaries.length === 1) {
+    const finalReduced = await _reduce(state.collapsedSummaries);
+    return { collapsedSummaries: [new Document({ pageContent: finalReduced })] };
+  }
+  
+  // Split into batches and reduce each batch
   const docLists = splitIntoDocLists(
     state.collapsedSummaries,
     maxTokens
   );
+  
+  // If we have multiple batches, reduce each one
   const results = [];
   for (const docList of docLists) {
-    results.push(await _reduce(docList));
+    const reduced = await _reduce(docList);
+    results.push(new Document({ pageContent: reduced }));
   }
-  return { collapsedSummaries: results.map(summary => new Document({ pageContent: summary })) };
+  
+  // If we merged down to 1 document, we're done
+  if (results.length === 1) {
+    return { collapsedSummaries: results };
+  }
+  
+  // Otherwise return the merged batches for another round
+  return { collapsedSummaries: results };
 };
 
 // This represents a conditional edge in the graph that determines
 // if we should collapse the summaries or not
-async function shouldCollapse(state: typeof OverallState.State) {
+async function needsBriefingMerge(state: typeof OverallState.State) {
+  // If only 1 document, we're done merging - compile
+  if (state.collapsedSummaries.length === 1) {
+    return "compileBriefing";
+  }
+  
   let numTokens = await lengthFunction(state.collapsedSummaries);
+  
+  // If still too many tokens, keep merging
   if (numTokens > maxTokens) {
-    return "collapseSummaries";
+    return "mergeBriefingBatches";
   } else {
-    return "generateFinalSummary";
+    // Otherwise, if we have multiple documents, merge them into one final summary
+    if (state.collapsedSummaries.length > 1) {
+      return "mergeBriefingBatches";
+    }
+    return "compileBriefing";
   }
 }
-const generateFinalSummary = async (state: typeof OverallState.State) => {
+const compileBriefing = async (state: typeof OverallState.State) => {
   const response = await _reduce(state.collapsedSummaries);
   return { finalSummary: response };
 };
 
 // Construct the graph
 const graph = new StateGraph(OverallState)
-  .addNode("generateSummary", generateSummary)
-  .addNode("collectSummaries", collectSummaries)
-  .addNode("collapseSummaries", collapseSummaries)
-  .addNode("generateFinalSummary", generateFinalSummary)
-  .addConditionalEdges("__start__", mapSummaries, ["generateSummary"])
-  .addEdge("generateSummary", "collectSummaries")
-  .addConditionalEdges("collectSummaries", shouldCollapse, [
-    "collapseSummaries",
-    "generateFinalSummary",
+  .addNode("createBriefingChunks", createBriefingChunks)
+  .addNode("aggregateBriefingSummaries", aggregateBriefingSummaries)
+  .addNode("mergeBriefingBatches", mergeBriefingBatches)
+  .addNode("compileBriefing", compileBriefing)
+  .addConditionalEdges("__start__", distributeBriefingContent, ["createBriefingChunks"])
+  .addEdge("createBriefingChunks", "aggregateBriefingSummaries")
+  .addConditionalEdges("aggregateBriefingSummaries", needsBriefingMerge, [
+    "mergeBriefingBatches",
+    "compileBriefing",
   ])
-  .addConditionalEdges("collapseSummaries", shouldCollapse, [
-    "collapseSummaries",
-    "generateFinalSummary",
+  .addConditionalEdges("mergeBriefingBatches", needsBriefingMerge, [
+    "mergeBriefingBatches",
+    "compileBriefing",
   ])
-  .addEdge("generateFinalSummary", "__end__");
+  .addEdge("compileBriefing", "__end__");
 
 const app = graph.compile();
 
@@ -179,11 +221,13 @@ for await (const step of await app.stream(
   {
     contents: splitDocs.map((doc) => doc.pageContent),
   },
-  { recursionLimit: 10 }
+  { recursionLimit: 150 }
 )) {
-  console.log(Object.keys(step));
-  if (step.generateFinalSummary) {
-    finalSummary = step.generateFinalSummary.finalSummary;
+  const stepKeys = Object.keys(step);
+  console.log(stepKeys);
+  
+  if (step.compileBriefing?.finalSummary) {
+    finalSummary = step.compileBriefing.finalSummary;
   }
 }
 

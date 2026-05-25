@@ -23,7 +23,7 @@ const llm = new ChatOpenAI({
     apiKey: process.env.LLM_API_KEY,
     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
 });
-const maxTokens = 1000
+const maxTokens = 2000
 
 function approximateTokens(text: string) {
     return Math.ceil(text.length / 4)
@@ -105,7 +105,7 @@ const distributeFAQContent = (state: typeof OverallState.State) => {
   // Each Send object consists of the name of a node in the graph
   // as well as the state to send to that node
   return state.contents.map(
-    (content) => new Send("generateSummary", { content })
+    (content) => new Send("createFAQChunks", { content })
   );
 };
 
@@ -157,9 +157,9 @@ const mergeFAQBatches = async (state: typeof OverallState.State) => {
 async function needsFAQMerge(state: typeof OverallState.State) {
   let numTokens = await lengthFunction(state.collapsedSummaries);
   if (numTokens > maxTokens) {
-    return "collapseSummaries";
+    return "mergeFAQBatches";
   } else {
-    return "generateFinalSummary";
+    return "compileFAQ";
   }
 }
 const compileFAQ = async (state: typeof OverallState.State) => {
@@ -196,8 +196,8 @@ for await (const step of await app.stream(
   { recursionLimit: 150 }
 )) {
   console.log(Object.keys(step));
-  if (step.generateFinalSummary) {
-    finalSummary = step.generateFinalSummary.finalSummary;
+  if (step.compileFAQ) {
+    finalSummary = step.compileFAQ.finalSummary;
   }
 }
 

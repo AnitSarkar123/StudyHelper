@@ -7,6 +7,7 @@ import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/
 import { ChatOpenAI } from "@langchain/openai";
 
 import "dotenv/config"
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 const loader = new CheerioWebBaseLoader("https://lilianweng.github.io/posts/2023-06-23-agent/")
 const docs = await loader.load();
     
@@ -23,7 +24,9 @@ const llm = new ChatOpenAI({
     apiKey: process.env.LLM_API_KEY,
     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
 });
-const maxTokens = 1000
+
+
+const maxTokens = 2000
 
 function approximateTokens(text: string) {
     return Math.ceil(text.length / 4)
@@ -80,19 +83,12 @@ interface SummaryState {
 }
 
 // Here we generate a summary, given a document
-const createGuideChunks = async (
+const generateSummary = async (
   state: SummaryState
 ): Promise<{ summaries: string[] }> => {
   const mapPrompt = ChatPromptTemplate.fromMessages([
-  [
-    "user",
-    `Create structured study notes for the following text. Include:
-- Key concepts / definitions
-- Examples or illustrations
-- Important points
-- Format as bullet points:\n\n{context}`,
-  ],
-]);
+    ["user", "Write a concise summary of the following: \n\n{context}"],
+  ]);
   const prompt = await mapPrompt.invoke({ context: state.content });
   const response = await llm.invoke(prompt);
   return { summaries: [String(response.content)] };
@@ -100,7 +96,7 @@ const createGuideChunks = async (
 
 // Here we define the logic to map out over the documents
 // We will use this an edge in the graph
-const distributeGuideContent = (state: typeof OverallState.State) => {
+const mapSummaries = (state: typeof OverallState.State) => {
   // We will return a list of Send objects
   // Each Send object consists of the name of a node in the graph
   // as well as the state to send to that node
@@ -110,7 +106,7 @@ const distributeGuideContent = (state: typeof OverallState.State) => {
 };
 
 
-const aggregateGuideSummaries = async (state: typeof OverallState.State) => {
+const collectSummaries = async (state: typeof OverallState.State) => {
   return {
     collapsedSummaries: state.summaries.map(
       (summary) => new Document({ pageContent: summary })
@@ -129,17 +125,11 @@ async function _reduce(documents: Document[]): Promise<string> {
 }
 
 const reducePrompt = ChatPromptTemplate.fromMessages([
-  [
-    "user",
-    `The following are study guide chunks:
-{docs}
-Distill these into a single cohesive study guide.
-Maintain key concepts, examples, and main points.`,
-  ],
+  ["user", "The following is a set of summaries:\n{docs}\nTake these and distill it into a final, consolidated summary of the main themes."],
 ]);
 
 
-const mergeGuideBatches = async (state: typeof OverallState.State) => {
+const collapseSummaries = async (state: typeof OverallState.State) => {
   const docLists = splitIntoDocLists(
     state.collapsedSummaries,
     maxTokens
@@ -153,7 +143,7 @@ const mergeGuideBatches = async (state: typeof OverallState.State) => {
 
 // This represents a conditional edge in the graph that determines
 // if we should collapse the summaries or not
-async function needsGuideMerge(state: typeof OverallState.State) {
+async function shouldCollapse(state: typeof OverallState.State) {
   let numTokens = await lengthFunction(state.collapsedSummaries);
   if (numTokens > maxTokens) {
     return "collapseSummaries";
@@ -161,28 +151,28 @@ async function needsGuideMerge(state: typeof OverallState.State) {
     return "generateFinalSummary";
   }
 }
-const compileGuide = async (state: typeof OverallState.State) => {
+const generateFinalSummary = async (state: typeof OverallState.State) => {
   const response = await _reduce(state.collapsedSummaries);
   return { finalSummary: response };
 };
 
 // Construct the graph
 const graph = new StateGraph(OverallState)
-  .addNode("createGuideChunks", createGuideChunks)
-  .addNode("aggregateGuideSummaries", aggregateGuideSummaries)
-  .addNode("mergeGuideBatches", mergeGuideBatches)
-  .addNode("compileGuide", compileGuide)
-  .addConditionalEdges("__start__", distributeGuideContent, ["createGuideChunks"])
-  .addEdge("createGuideChunks", "aggregateGuideSummaries")
-  .addConditionalEdges("aggregateGuideSummaries", needsGuideMerge, [
-    "mergeGuideBatches",
-    "compileGuide",
+  .addNode("generateSummary", generateSummary)
+  .addNode("collectSummaries", collectSummaries)
+  .addNode("collapseSummaries", collapseSummaries)
+  .addNode("generateFinalSummary", generateFinalSummary)
+  .addConditionalEdges("__start__", mapSummaries, ["generateSummary"])
+  .addEdge("generateSummary", "collectSummaries")
+  .addConditionalEdges("collectSummaries", shouldCollapse, [
+    "collapseSummaries",
+    "generateFinalSummary",
   ])
-  .addConditionalEdges("mergeGuideBatches", needsGuideMerge, [
-    "mergeGuideBatches",
-    "compileGuide",
+  .addConditionalEdges("collapseSummaries", shouldCollapse, [
+    "collapseSummaries",
+    "generateFinalSummary",
   ])
-  .addEdge("compileGuide", "__end__");
+  .addEdge("generateFinalSummary", "__end__");
 
 const app = graph.compile();
 

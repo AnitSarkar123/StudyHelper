@@ -23,7 +23,7 @@ const llm = new ChatOpenAI({
     apiKey: process.env.LLM_API_KEY,
     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
 });
-const maxTokens = 1000
+const maxTokens = 25000
 
 function approximateTokens(text: string) {
     return Math.ceil(text.length / 4)
@@ -80,18 +80,17 @@ interface SummaryState {
 }
 
 // Here we generate a summary, given a document
-const createBriefingChunks = async (
+const createGuideChunks = async (
   state: SummaryState
 ): Promise<{ summaries: string[] }> => {
   const mapPrompt = ChatPromptTemplate.fromMessages([
   [
     "user",
-    `Create a professional briefing document for the following text.
-Include:
-- Summary of main ideas
-- Key takeaways
-- Actionable insights or recommendations
-Format as concise, clear paragraphs:\n\n{context}`,
+    `Create structured study notes for the following text. Include:
+- Key concepts / definitions
+- Examples or illustrations
+- Important points
+- Format as bullet points:\n\n{context}`,
   ],
 ]);
   const prompt = await mapPrompt.invoke({ context: state.content });
@@ -101,17 +100,17 @@ Format as concise, clear paragraphs:\n\n{context}`,
 
 // Here we define the logic to map out over the documents
 // We will use this an edge in the graph
-const distributeBriefingContent = (state: typeof OverallState.State) => {
+const distributeGuideContent = (state: typeof OverallState.State) => {
   // We will return a list of Send objects
   // Each Send object consists of the name of a node in the graph
   // as well as the state to send to that node
   return state.contents.map(
-    (content) => new Send("generateSummary", { content })
+    (content) => new Send("createGuideChunks", { content })
   );
 };
 
 
-const aggregateBriefingSummaries = async (state: typeof OverallState.State) => {
+const aggregateGuideSummaries = async (state: typeof OverallState.State) => {
   return {
     collapsedSummaries: state.summaries.map(
       (summary) => new Document({ pageContent: summary })
@@ -132,15 +131,15 @@ async function _reduce(documents: Document[]): Promise<string> {
 const reducePrompt = ChatPromptTemplate.fromMessages([
   [
     "user",
-    `The following are briefing chunks:
+    `The following are study guide chunks:
 {docs}
-Distill these into a single cohesive briefing document.
-Maintain main ideas, key takeaways, and actionable insights.`,
+Distill these into a single cohesive study guide.
+Maintain key concepts, examples, and main points.`,
   ],
 ]);
 
 
-const mergeBriefingBatches = async (state: typeof OverallState.State) => {
+const mergeGuideBatches = async (state: typeof OverallState.State) => {
   const docLists = splitIntoDocLists(
     state.collapsedSummaries,
     maxTokens
@@ -154,36 +153,36 @@ const mergeBriefingBatches = async (state: typeof OverallState.State) => {
 
 // This represents a conditional edge in the graph that determines
 // if we should collapse the summaries or not
-async function needsBriefingMerge(state: typeof OverallState.State) {
+async function needsGuideMerge(state: typeof OverallState.State) {
   let numTokens = await lengthFunction(state.collapsedSummaries);
   if (numTokens > maxTokens) {
-    return "collapseSummaries";
+    return "mergeGuideBatches";
   } else {
-    return "generateFinalSummary";
+    return "compileGuide";
   }
 }
-const compileBriefing = async (state: typeof OverallState.State) => {
+const compileGuide = async (state: typeof OverallState.State) => {
   const response = await _reduce(state.collapsedSummaries);
   return { finalSummary: response };
 };
 
 // Construct the graph
 const graph = new StateGraph(OverallState)
-  .addNode("createBriefingChunks", createBriefingChunks)
-  .addNode("aggregateBriefingSummaries", aggregateBriefingSummaries)
-  .addNode("mergeBriefingBatches", mergeBriefingBatches)
-  .addNode("compileBriefing", compileBriefing)
-  .addConditionalEdges("__start__", distributeBriefingContent, ["createBriefingChunks"])
-  .addEdge("createBriefingChunks", "aggregateBriefingSummaries")
-  .addConditionalEdges("aggregateBriefingSummaries", needsBriefingMerge, [
-    "mergeBriefingBatches",
-    "compileBriefing",
+  .addNode("createGuideChunks", createGuideChunks)
+  .addNode("aggregateGuideSummaries", aggregateGuideSummaries)
+  .addNode("mergeGuideBatches", mergeGuideBatches)
+  .addNode("compileGuide", compileGuide)
+  .addConditionalEdges("__start__", distributeGuideContent, ["createGuideChunks"])
+  .addEdge("createGuideChunks", "aggregateGuideSummaries")
+  .addConditionalEdges("aggregateGuideSummaries", needsGuideMerge, [
+    "mergeGuideBatches",
+    "compileGuide",
   ])
-  .addConditionalEdges("mergeBriefingBatches", needsBriefingMerge, [
-    "mergeBriefingBatches",
-    "compileBriefing",
+  .addConditionalEdges("mergeGuideBatches", needsGuideMerge, [
+    "mergeGuideBatches",
+    "compileGuide",
   ])
-  .addEdge("compileBriefing", "__end__");
+  .addEdge("compileGuide", "__end__");
 
 const app = graph.compile();
 
@@ -196,8 +195,8 @@ for await (const step of await app.stream(
   { recursionLimit: 150 }
 )) {
   console.log(Object.keys(step));
-  if (step.generateFinalSummary) {
-    finalSummary = step.generateFinalSummary.finalSummary;
+  if (step.compileGuide) {
+    finalSummary = step.compileGuide.finalSummary;
   }
 }
 

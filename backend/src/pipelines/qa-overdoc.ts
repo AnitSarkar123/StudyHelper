@@ -5,13 +5,13 @@ import { PromptTemplate ,ChatPromptTemplate} from "@langchain/core/prompts";
 import { z } from "zod"
 import zodToJsonSchema from "zod-to-json-schema";
 import { ChatOpenAI } from "@langchain/openai";
-import { queryVectorDB } from "./retriver.ts";
-import { reciprocalRankFusion } from "./RRF.ts";
+import { queryVectorDB } from "./retriver.js";
+import { reciprocalRankFusion } from "./RRF.js";
 // import { DocumentInterface } from "@langchain/core/documents.js";
 // import { ChatFireworks } from "@langchain/community/chat_models/fireworks";
 // import { response_generator_prompt } from "./prompt.ts";
-import { extractMessage, generateResponseFormatter, gradeDocResponseFormater, questionsResponseFormater, TransformResponseFormatter } from "./utils/index.ts";
-import { generate_question_prompt, grade_doc_prompt, response_generator_prompt, transform_query_prompt } from "./prompt/prompts.ts";
+import { extractMessage, generateResponseFormatter, gradeDocResponseFormater, questionsResponseFormater, TransformResponseFormatter } from "../utils/index.js";
+import { generate_question_prompt, grade_doc_prompt, response_generator_prompt, transform_query_prompt } from "../prompt/prompts.js";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { TavilySearch } from "@langchain/tavily";
 // import { last } from "cheerio/dist/commonjs/api/traversing.js";
@@ -23,7 +23,7 @@ const llm = new ChatOpenAI({
         baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
     },
     apiKey: process.env.LLM_API_KEY,
-    model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
+    model: process.env.LLM_MODEL_NAME1 || "gpt-3.5-turbo",
 });
 // const llm = new ChatFireworks({
 // model: "accounts/fireworks/models/llama-v3p1-70b-instruct",
