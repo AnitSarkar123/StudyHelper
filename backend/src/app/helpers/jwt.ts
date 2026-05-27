@@ -73,3 +73,16 @@ export async function generateTokens(userId: Types.ObjectId) {
     refreshToken
   };
 }
+
+/**
+ * Decode and verify a JWT token (returns decoded payload or null)
+ */
+export function decodeAccessToken(token: string): any {
+    try {
+        const key = process.env.JWT_TOKEN_KEY as string;
+        const decoded = jwt.verify(token, key);
+        return decoded;
+    } catch (error) {
+        return null;
+    }
+}

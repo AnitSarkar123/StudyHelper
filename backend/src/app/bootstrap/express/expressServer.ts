@@ -9,12 +9,28 @@ import { User } from "@/app/models/userSchema";
 import { UserRepository } from "@/app/http/controllers/auth/repository/useRepository";
 import { apiV1Routes } from "@/routes/apiV1";
 import MongoStore from "connect-mongo";
+import { cwd } from "process";
+import path from "path/win32";
 export function expressServer(app: Express, PORT: number) {
     const router =Router()
-     app.use(cors({
-        origin:"*",
-        credentials:true
+    
+    // CORS configuration - allow multiple origins with credentials
+    const allowedOrigins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "https://hoppscotch.io",
+        process.env.FRONTEND_URL || ""
+    ].filter(Boolean);
+    
+    app.use(cors({
+        origin: allowedOrigins,
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization"]
     }))
+    const currentDir = cwd();
+    app.use(express.static(path.join(currentDir, "public")))
     
     app.use(express.json())
     app.use(express.urlencoded({ extended: true }))
@@ -35,7 +51,9 @@ export function expressServer(app: Express, PORT: number) {
         resave: false,
         saveUninitialized: false,
         cookie: {
-            secure: false
+            secure: false,
+            sameSite: "lax" as const,
+            maxAge: 1000 * 60 * 60 * 24 // 24 hours
         }
     }
     if (process.env.NODE_ENV === "production") {
@@ -45,6 +63,14 @@ export function expressServer(app: Express, PORT: number) {
     app.use(session(sess))
     app.use(passport.initialize())
     app.use(passport.session())
+    
+    // Request logging middleware
+    app.use((req: Request, res: Response, next) => {
+        const authMethod = req.user ? "✅ Authenticated (Session)" : "❌ Not authenticated";
+        const jwtHeader = req.headers.authorization ? "📝 JWT in header" : "❌ No JWT";
+        console.log(`📨 [${req.method}] ${req.path} | ${authMethod} | ${jwtHeader}`);
+        next();
+    });
     passport.use(new GoogleStrategy(
         {
             clientID: process.env.GOOGLE_CLIENT_ID as string,
@@ -124,12 +150,55 @@ export function expressServer(app: Express, PORT: number) {
             }
         }
     )
-    app.get("/auth/me", (req: Request, res: Response) => {
+    app.get("/auth/me", async (req: Request, res: Response) => {
        if (!req.user) {
         return res.status(401).json({ message: "Not authenticated/logged in" })
        }
-       res.json({ user: req.user })
+       
+       try {
+           // Generate JWT tokens for the authenticated user
+           const { generateTokens } = await import("@/app/helpers/jwt");
+           const { accessToken, refreshToken } = await generateTokens((req.user as any)._id);
+           
+           res.json({ 
+               user: req.user,
+               accessToken: accessToken,
+               refreshToken: refreshToken
+           });
+       } catch (error: any) {
+           console.error("❌ Error generating tokens:", error.message);
+           res.json({ user: req.user }); // Fallback to just user data
+       }
     })
+    
+    // JWT Authentication Middleware - Check for Authorization header
+    app.use(async (req: Request, res: Response, next) => {
+        const authHeader = req.headers.authorization;
+        
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            const token = authHeader.substring(7); // Remove "Bearer " prefix
+            try {
+                // Import the decode function
+                const { decodeAccessToken } = await import("@/app/helpers/jwt");
+                const decoded: any = decodeAccessToken(token);
+                
+                if (decoded?.sub) {
+                    // Token is valid, find and attach user to req.user
+                    const user = await User.findById(decoded.sub);
+                    if (user) {
+                        (req as any).user = user;
+                        console.log("🔑 JWT authentication successful:", user._id);
+                    }
+                } else {
+                    console.warn("⚠️ JWT token is invalid or expired");
+                }
+            } catch (error: any) {
+                console.warn("⚠️ JWT verification failed:", error.message);
+            }
+        }
+        next(); // Continue regardless (auth optional)
+    });
+    
     apiV1Routes(app,router)
 
     // Error handling middleware - MUST be after all routes
