@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const docSchema = new mongoose.Schema({
   title: { type: String, required: true },
+  fileName: { type: String, required: true },
   description: { type: String },
   summary: { type: String },
   studyGuide: { type: String },

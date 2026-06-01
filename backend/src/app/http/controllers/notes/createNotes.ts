@@ -1,13 +1,14 @@
 import { NextFunction, Response, Request } from "express";
 import { NoteRepository } from "./repository/NoteRepository";
 import path from "path";
-import { generateTitle } from "./TitleGeneration";
-import { generatePrompt } from "./promptGenerator";
-import { generateImage } from "./generateImage";
-import { loadDocument, splitDocToChunks, getDocChunk } from "./loders";
+import { generateTitle } from "./helpers/TitleGeneration";
+import { generatePrompt } from "./helpers/promptGenerator";
+import { generateImage } from "./helpers/generateImage";
+import { loadDocument, splitDocToChunks, getDocChunk } from "./loders/loders";
 import { ChatFireworks } from "@langchain/community/chat_models/fireworks";
 import { LLM } from "@/app/llm/LLM";
 import mongoose from "mongoose";
+import { DocRepository } from "./repository/DocRepository";
 /** 
  * Create a note from an uploaded file
  * Flow: Upload File → Load & Split → Generate Title → Generate Image Prompt → Generate Image → Save to MongoDB
@@ -98,6 +99,8 @@ export async function createNotes(req: Request, res: Response, next: NextFunctio
                 // Callback: Save note when image is ready
                 const imageUrl = `${process.env.APP_URL}/uploads/${fileName}`;
                 const noteRepo = NoteRepository.getInstance();
+                
+
                 savedNote = await noteRepo.createNote({
                     title: title,
                     image: imageUrl,
@@ -107,6 +110,14 @@ export async function createNotes(req: Request, res: Response, next: NextFunctio
                 return savedNote;
             }
         );
+        const DocRepo = DocRepository.getInstance();
+        const savedDoc = await DocRepo.createDoc({
+            title,
+            fileName: filePath,
+            userId: finalUserId.toString(),
+            noteId: savedNote._id
+        })
+        console.log("✅ Doc saved:", savedDoc._id);
 
         console.log("✅ Image generated and note saved:", imageResult.fileName);
 

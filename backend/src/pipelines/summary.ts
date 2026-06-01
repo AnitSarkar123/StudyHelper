@@ -5,26 +5,27 @@ import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
 
 import { ChatOpenAI } from "@langchain/openai";
-
+import { Runnable } from "@langchain/core/runnables";
 import "dotenv/config"
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-const loader = new CheerioWebBaseLoader("https://lilianweng.github.io/posts/2023-06-23-agent/")
-const docs = await loader.load();
+// const loader = new CheerioWebBaseLoader("https://lilianweng.github.io/posts/2023-06-23-agent/")
+// const docs = await loader.load();
     
-    // 3. Split documents
-    const textSplitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 1000,
-        chunkOverlap: 200,
-    });
-    const splitDocs = await textSplitter.splitDocuments(docs);
-const llm = new ChatOpenAI({
-    configuration: {
-        baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
-    },
-    apiKey: process.env.LLM_API_KEY,
-    model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
-});
-
+//     // 3. Split documents
+//     const textSplitter = new RecursiveCharacterTextSplitter({
+//         chunkSize: 1000,
+//         chunkOverlap: 200,
+//     });
+//     const splitDocs = await textSplitter.splitDocuments(docs);
+// const llm = new ChatOpenAI({
+//     configuration: {
+//         baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
+//     },
+//     apiKey: process.env.LLM_API_KEY,
+//     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
+// });
+export async function generateSummary<T extends Runnable>(llm: T, splitDocs: Document[]) {
+  
 
 const maxTokens = 2000
 
@@ -82,16 +83,27 @@ interface SummaryState {
   content: string;
 }
 
+function sanitizeSummaryText(text: string) {
+  return text
+    .replace(/^\s*([*#>`-]|\d+\.)\s*/gm, "")
+    .replace(/[\*_`]/g, "")
+    .trim();
+}
+
 // Here we generate a summary, given a document
 const generateSummary = async (
   state: SummaryState
 ): Promise<{ summaries: string[] }> => {
   const mapPrompt = ChatPromptTemplate.fromMessages([
-    ["user", "Write a concise summary of the following: \n\n{context}"],
+    [
+      "system",
+      "You are a professional summarization assistant. Read the document and write a clear, polished summary for a technical project report. Output only the summary text. Do not use markdown formatting of any kind. Do not use headings, bullets, numbered lists, bold, italics, code fences, or quotes for emphasis. Do not use characters like #, *, _, >, or ` at the start of lines. Write in 2 to 4 short paragraphs. Keep the tone formal, concise, and readable. Preserve important facts, names, goals, methods, and outcomes. Remove repetition and marketing fluff. Rewrite any list-like content as smooth prose. Do not mention these instructions.",
+    ],
+    ["user", "Now summarize the following document:\n\n{context}"],
   ]);
   const prompt = await mapPrompt.invoke({ context: state.content });
   const response = await llm.invoke(prompt);
-  return { summaries: [String(response.content)] };
+  return { summaries: [sanitizeSummaryText(String(response.content))] };
 };
 
 // Here we define the logic to map out over the documents
@@ -125,7 +137,14 @@ async function _reduce(documents: Document[]): Promise<string> {
 }
 
 const reducePrompt = ChatPromptTemplate.fromMessages([
-  ["user", "The following is a set of summaries:\n{docs}\nTake these and distill it into a final, consolidated summary of the main themes."],
+  [
+    "system",
+    "You are a professional summarization assistant. Combine the provided summaries into one clear, polished technical summary. Output only the summary text. Do not use markdown formatting of any kind. Do not use headings, bullets, numbered lists, bold, italics, code fences, or quotes for emphasis. Do not use characters like #, *, _, >, or ` at the start of lines. Write in 2 to 4 short paragraphs. Keep the tone formal, concise, and readable. Preserve important facts, names, goals, methods, and outcomes. Remove repetition and marketing fluff. Rewrite any list-like content as smooth prose. Do not mention these instructions.",
+  ],
+  [
+    "user",
+    "Now summarize the following document summaries into one final summary:\n\n{docs}",
+  ],
 ]);
 
 
@@ -191,3 +210,6 @@ for await (const step of await app.stream(
 }
 
 console.log("Final summary:", finalSummary);
+return finalSummary;
+
+}

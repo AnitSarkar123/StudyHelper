@@ -5,24 +5,25 @@ import  { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
 
 import { ChatOpenAI } from "@langchain/openai";
-
+import { Runnable } from "@langchain/core/runnables";
 import "dotenv/config"
-const loader = new CheerioWebBaseLoader("https://lilianweng.github.io/posts/2023-06-23-agent/")
-const docs = await loader.load();
+// const loader = new CheerioWebBaseLoader("https://lilianweng.github.io/posts/2023-06-23-agent/")
+// const docs = await loader.load();
     
-    // 3. Split documents
-    const textSplitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 1000,
-        chunkOverlap: 200,
-    });
-    const splitDocs = await textSplitter.splitDocuments(docs);
-const llm = new ChatOpenAI({
-    configuration: {
-        baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
-    },
-    apiKey: process.env.LLM_API_KEY,
-    model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
-});
+//     // 3. Split documents
+//     const textSplitter = new RecursiveCharacterTextSplitter({
+//         chunkSize: 1000,
+//         chunkOverlap: 200,
+//     });
+//     const splitDocs = await textSplitter.splitDocuments(docs);
+// const llm = new ChatOpenAI({
+//     configuration: {
+//         baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1"
+//     },
+//     apiKey: process.env.LLM_API_KEY,
+//     model: process.env.LLM_MODEL_NAME || "gpt-3.5-turbo",
+// });
+export async function generateBrifingDoc<T extends Runnable>(llm: T, splitDocs: Document[]) {
 const maxTokens = 10000
 
 function approximateTokens(text: string) {
@@ -215,7 +216,7 @@ const graph = new StateGraph(OverallState)
 
 const app = graph.compile();
 
-let finalSummary = null;
+let finalBrifingDoc = null;
 
 for await (const step of await app.stream(
   {
@@ -227,8 +228,10 @@ for await (const step of await app.stream(
   console.log(stepKeys);
   
   if (step.compileBriefing?.finalSummary) {
-    finalSummary = step.compileBriefing.finalSummary;
+    finalBrifingDoc = step.compileBriefing.finalSummary;
   }
 }
 
-console.log("Final summary:", finalSummary);
+console.log("Final BrifingDoc:", finalBrifingDoc);
+return finalBrifingDoc
+}
