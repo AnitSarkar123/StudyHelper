@@ -6,8 +6,8 @@ import { NoteRepository } from "./repository/NoteRepository";
 import { cwd } from "process";
 import path from "path";
 // import { generateTitle } from "./titleGeneration";
-import { generatePrompt } from "./promptGenerator";
-import { generateImage } from "./generateImage";
+import { generatePrompt } from "./helpers/promptGenerator";
+import { generateImage } from "./helpers/generateImage";
 import { LLM } from "../../../llm/LLM";
 // import { loadDocument } from "./loaders";
 export async function updateNote(req: Request, res: Response, next: NextFunction) {

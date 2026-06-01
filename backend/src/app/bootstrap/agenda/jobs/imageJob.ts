@@ -1,5 +1,5 @@
 import agenda from "../agenda";
-import { generateImage } from "../../../http/controllers/notes/generateImage";
+import { generateImage } from "../../../http/controllers/notes/helpers/generateImage";
 import { NoteRepository } from "../../../http/controllers/notes/repository/NoteRepository";
 
 agenda.define("generateImage", async (job: any) => {
